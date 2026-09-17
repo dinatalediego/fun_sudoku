@@ -98,30 +98,32 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             .apply()
     }
 
-    private fun restore(): GameState? = runCatching {
-        val raw = prefs.getString("cells", null) ?: return null
-        val solution = prefs.getString("solution", null)?.map { it.digitToInt() } ?: return null
-        val cells = raw.split(";").mapIndexed { i, token ->
-            val p = token.split(",")
-            Cell(
-                row = i / 9,
-                col = i % 9,
-                value = p[0].toInt(),
-                fixed = p[1] == "1",
-                notes = p[2].mapNotNull { it.digitToIntOrNull() }.toSet(),
-                error = p.getOrNull(3) == "1"
+    private fun restore(): GameState? {
+        return runCatching {
+            val raw = prefs.getString("cells", null) ?: return@runCatching null
+            val solution = prefs.getString("solution", null)?.map { it.digitToInt() } ?: return@runCatching null
+            val cells = raw.split(";").mapIndexed { i, token ->
+                val p = token.split(",")
+                Cell(
+                    row = i / 9,
+                    col = i % 9,
+                    value = p[0].toInt(),
+                    fixed = p[1] == "1",
+                    notes = p[2].mapNotNull { it.digitToIntOrNull() }.toSet(),
+                    error = p.getOrNull(3) == "1"
+                )
+            }
+            GameState(
+                cells = cells,
+                solution = solution,
+                difficulty = Difficulty.valueOf(prefs.getString("difficulty", Difficulty.MEDIUM.name)!!),
+                mistakes = prefs.getInt("mistakes", 0),
+                hintsUsed = prefs.getInt("hints", 0),
+                elapsedSeconds = prefs.getLong("elapsed", 0),
+                completed = prefs.getBoolean("completed", false)
             )
-        }
-        GameState(
-            cells = cells,
-            solution = solution,
-            difficulty = Difficulty.valueOf(prefs.getString("difficulty", Difficulty.MEDIUM.name)!!),
-            mistakes = prefs.getInt("mistakes", 0),
-            hintsUsed = prefs.getInt("hints", 0),
-            elapsedSeconds = prefs.getLong("elapsed", 0),
-            completed = prefs.getBoolean("completed", false)
-        )
-    }.getOrNull()
+        }.getOrNull()
+    }
 
     private fun recordWin() {
         val wins = prefs.getInt("wins", 0) + 1
