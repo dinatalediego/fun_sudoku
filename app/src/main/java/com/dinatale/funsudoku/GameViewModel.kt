@@ -8,10 +8,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class GameViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = app.getSharedPreferences("fun_sudoku", 0)
+
     var state by mutableStateOf(newGame(Difficulty.MEDIUM))
+        private set
+
+    var history by mutableStateOf(loadHistory())
         private set
 
     init {
@@ -46,13 +51,19 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val correct = state.solution[index] == value
-        replace(index, cell.copy(value = value, notes = emptySet(), error = !correct), mistakeDelta = if (correct) 0 else 1)
+        replace(
+            index,
+            cell.copy(value = value, notes = emptySet(), error = !correct),
+            mistakeDelta = if (correct) 0 else 1
+        )
     }
 
     fun erase() {
         val index = state.selected ?: return
         val cell = state.cells[index]
-        if (!cell.fixed && !state.paused) replace(index, cell.copy(value = 0, notes = emptySet(), error = false))
+        if (!cell.fixed && !state.paused) {
+            replace(index, cell.copy(value = 0, notes = emptySet(), error = false))
+        }
     }
 
     fun hint() {
@@ -60,12 +71,22 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             ?: state.cells.indices.firstOrNull { !state.cells[it].fixed && state.cells[it].value == 0 }
             ?: return
         val cell = state.cells[index]
-        replace(index, cell.copy(value = state.solution[index], notes = emptySet(), error = false), hintDelta = 1)
+        replace(
+            index,
+            cell.copy(value = state.solution[index], notes = emptySet(), error = false),
+            hintDelta = 1
+        )
         state = state.copy(selected = index)
     }
 
+    fun playerStats(): PlayerStats = PlayerStats.from(history)
+
+    fun bestFor(difficulty: Difficulty): Long? =
+        history.filter { it.difficulty == difficulty }.minOfOrNull { it.elapsedSeconds }
+
     private fun replace(index: Int, cell: Cell, mistakeDelta: Int = 0, hintDelta: Int = 0) {
         val updated = state.cells.toMutableList().apply { this[index] = cell }
+        val wasCompleted = state.completed
         val completed = updated.indices.all { updated[it].value == state.solution[it] }
         state = state.copy(
             cells = updated,
@@ -74,7 +95,7 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             completed = completed
         )
         persist()
-        if (completed) recordWin()
+        if (completed && !wasCompleted) recordWin()
     }
 
     private fun newGame(difficulty: Difficulty): GameState {
@@ -86,7 +107,9 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun persist() {
-        val cells = state.cells.joinToString(";") { c -> "${c.value},${if (c.fixed) 1 else 0},${c.notes.sorted().joinToString("")},${if (c.error) 1 else 0}" }
+        val cells = state.cells.joinToString(";") { c ->
+            "${c.value},${if (c.fixed) 1 else 0},${c.notes.sorted().joinToString("")},${if (c.error) 1 else 0}"
+        }
         prefs.edit()
             .putString("cells", cells)
             .putString("solution", state.solution.joinToString(""))
@@ -101,7 +124,8 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
     private fun restore(): GameState? {
         return runCatching {
             val raw = prefs.getString("cells", null) ?: return@runCatching null
-            val solution = prefs.getString("solution", null)?.map { it.digitToInt() } ?: return@runCatching null
+            val solution = prefs.getString("solution", null)?.map { it.digitToInt() }
+                ?: return@runCatching null
             val cells = raw.split(";").mapIndexed { i, token ->
                 val p = token.split(",")
                 Cell(
@@ -116,7 +140,9 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
             GameState(
                 cells = cells,
                 solution = solution,
-                difficulty = Difficulty.valueOf(prefs.getString("difficulty", Difficulty.MEDIUM.name)!!),
+                difficulty = Difficulty.valueOf(
+                    prefs.getString("difficulty", Difficulty.MEDIUM.name)!!
+                ),
                 mistakes = prefs.getInt("mistakes", 0),
                 hintsUsed = prefs.getInt("hints", 0),
                 elapsedSeconds = prefs.getLong("elapsed", 0),
@@ -126,15 +152,64 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun recordWin() {
+        val record = GameRecord(
+            id = UUID.randomUUID().toString(),
+            difficulty = state.difficulty,
+            elapsedSeconds = state.elapsedSeconds,
+            mistakes = state.mistakes,
+            hintsUsed = state.hintsUsed,
+            completedAtMillis = System.currentTimeMillis()
+        )
+        history = listOf(record) + history
+        saveHistory()
+
+        // Keep the legacy counters for backwards compatibility with the original v1 UI/data.
         val wins = prefs.getInt("wins", 0) + 1
         val bestKey = "best_${state.difficulty.name}"
         val best = prefs.getLong(bestKey, Long.MAX_VALUE)
         prefs.edit().putInt("wins", wins).apply()
-        if (state.elapsedSeconds < best) prefs.edit().putLong(bestKey, state.elapsedSeconds).apply()
+        if (state.elapsedSeconds < best) {
+            prefs.edit().putLong(bestKey, state.elapsedSeconds).apply()
+        }
+    }
+
+    private fun saveHistory() {
+        val encoded = history.joinToString(";") { record ->
+            listOf(
+                record.id,
+                record.difficulty.name,
+                record.elapsedSeconds,
+                record.mistakes,
+                record.hintsUsed,
+                record.completedAtMillis
+            ).joinToString("|")
+        }
+        prefs.edit().putString("history_records_v1", encoded).apply()
+    }
+
+    private fun loadHistory(): List<GameRecord> {
+        val encoded = prefs.getString("history_records_v1", null) ?: return emptyList()
+        if (encoded.isBlank()) return emptyList()
+        return encoded.split(";").mapNotNull { token ->
+            runCatching {
+                val p = token.split("|")
+                GameRecord(
+                    id = p[0],
+                    difficulty = Difficulty.valueOf(p[1]),
+                    elapsedSeconds = p[2].toLong(),
+                    mistakes = p[3].toInt(),
+                    hintsUsed = p[4].toInt(),
+                    completedAtMillis = p[5].toLong()
+                )
+            }.getOrNull()
+        }.sortedByDescending { it.completedAtMillis }
     }
 
     fun stats(): Pair<Int, Long?> {
-        val best = prefs.getLong("best_${state.difficulty.name}", Long.MAX_VALUE)
-        return prefs.getInt("wins", 0) to best.takeIf { it != Long.MAX_VALUE }
+        val totalWins = maxOf(history.size, prefs.getInt("wins", 0))
+        val best = bestFor(state.difficulty)
+            ?: prefs.getLong("best_${state.difficulty.name}", Long.MAX_VALUE)
+                .takeIf { it != Long.MAX_VALUE }
+        return totalWins to best
     }
 }
