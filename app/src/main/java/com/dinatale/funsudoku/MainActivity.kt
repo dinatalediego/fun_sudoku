@@ -64,6 +64,7 @@ private fun FunSudokuTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SudokuApp(vm: GameViewModel) {
     val game = vm.state
