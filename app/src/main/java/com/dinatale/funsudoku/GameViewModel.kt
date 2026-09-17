@@ -19,8 +19,20 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
     var history by mutableStateOf(loadHistory())
         private set
 
+    var accountEmail by mutableStateOf<String?>(null)
+        private set
+
+    var cloudMessage by mutableStateOf(
+        if (CloudBackend.configured) "Listo para iniciar sesión" else "Sincronización Google pendiente de configurar"
+    )
+        private set
+
+    val cloudConfigured: Boolean
+        get() = CloudBackend.configured
+
     init {
         restore()?.let { state = it }
+        refreshCloudAccount()
         viewModelScope.launch {
             while (true) {
                 delay(1000)
@@ -83,6 +95,52 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
 
     fun bestFor(difficulty: Difficulty): Long? =
         history.filter { it.difficulty == difficulty }.minOfOrNull { it.elapsedSeconds }
+
+    fun signInGoogle() {
+        if (!CloudBackend.configured) {
+            cloudMessage = "Falta crear y conectar el proyecto Supabase de Fun Sudoku"
+            return
+        }
+        viewModelScope.launch {
+            runCatching { CloudBackend.signInWithGoogle() }
+                .onFailure { cloudMessage = it.message ?: "No se pudo abrir Google" }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            runCatching { CloudBackend.signOut() }
+            accountEmail = null
+            cloudMessage = "Sesión cerrada. Tus partidas locales siguen intactas."
+        }
+    }
+
+    fun refreshCloudAccount() {
+        viewModelScope.launch {
+            if (!CloudBackend.configured) return@launch
+            // The OAuth deep-link handler imports the session asynchronously on Android.
+            delay(400)
+            accountEmail = CloudBackend.currentEmail()
+            if (accountEmail != null) {
+                syncCloud()
+            }
+        }
+    }
+
+    fun syncCloud() {
+        if (!CloudBackend.configured || CloudBackend.currentEmail() == null) return
+        viewModelScope.launch {
+            cloudMessage = "Sincronizando…"
+            runCatching { CloudBackend.sync(history) }
+                .onSuccess { merged ->
+                    history = merged
+                    saveHistory()
+                    accountEmail = CloudBackend.currentEmail()
+                    cloudMessage = "Sincronizado"
+                }
+                .onFailure { cloudMessage = "Sin conexión: tus datos siguen guardados localmente" }
+        }
+    }
 
     private fun replace(index: Int, cell: Cell, mistakeDelta: Int = 0, hintDelta: Int = 0) {
         val updated = state.cells.toMutableList().apply { this[index] = cell }
@@ -163,7 +221,6 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         history = listOf(record) + history
         saveHistory()
 
-        // Keep the legacy counters for backwards compatibility with the original v1 UI/data.
         val wins = prefs.getInt("wins", 0) + 1
         val bestKey = "best_${state.difficulty.name}"
         val best = prefs.getLong(bestKey, Long.MAX_VALUE)
@@ -171,6 +228,8 @@ class GameViewModel(app: Application) : AndroidViewModel(app) {
         if (state.elapsedSeconds < best) {
             prefs.edit().putLong(bestKey, state.elapsedSeconds).apply()
         }
+
+        if (accountEmail != null) syncCloud()
     }
 
     private fun saveHistory() {
