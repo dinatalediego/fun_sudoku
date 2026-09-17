@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -22,12 +24,20 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import java.text.DateFormat
+import java.util.Date
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { FunSudokuTheme { SudokuApp() } }
     }
+}
+
+private enum class AppTab(val label: String) {
+    PLAY("Jugar"),
+    GAMES("Mis juegos"),
+    PROFILE("Perfil")
 }
 
 @Composable
@@ -45,41 +55,71 @@ private fun FunSudokuTheme(content: @Composable () -> Unit) {
 @Composable
 private fun SudokuApp(vm: GameViewModel = viewModel()) {
     val game = vm.state
+    var tab by remember { mutableStateOf(AppTab.PLAY) }
     var showDifficulty by remember { mutableStateOf(false) }
     val (wins, best) = vm.stats()
 
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("FUN SUDOKU", fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp) },
+                title = {
+                    Text(
+                        when (tab) {
+                            AppTab.PLAY -> "FUN SUDOKU"
+                            AppTab.GAMES -> "MIS JUEGOS"
+                            AppTab.PROFILE -> "PERFIL"
+                        },
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.sp
+                    )
+                },
                 actions = {
-                    IconButton(onClick = { showDifficulty = true }) {
-                        Icon(Icons.Rounded.Add, contentDescription = "Nueva partida")
+                    if (tab == AppTab.PLAY) {
+                        IconButton(onClick = { showDifficulty = true }) {
+                            Icon(Icons.Rounded.Add, contentDescription = "Nueva partida")
+                        }
                     }
                 }
             )
+        },
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = tab == AppTab.PLAY,
+                    onClick = { tab = AppTab.PLAY },
+                    icon = { Icon(Icons.Rounded.SportsEsports, null) },
+                    label = { Text(AppTab.PLAY.label) }
+                )
+                NavigationBarItem(
+                    selected = tab == AppTab.GAMES,
+                    onClick = { tab = AppTab.GAMES },
+                    icon = { Icon(Icons.Rounded.QueryStats, null) },
+                    label = { Text(AppTab.GAMES.label) }
+                )
+                NavigationBarItem(
+                    selected = tab == AppTab.PROFILE,
+                    onClick = { tab = AppTab.PROFILE },
+                    icon = { Icon(Icons.Rounded.Person, null) },
+                    label = { Text(AppTab.PROFILE.label) }
+                )
+            }
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            GameHeader(game, wins, best)
-            Spacer(Modifier.height(12.dp))
-            SudokuBoard(game, vm::select)
-            Spacer(Modifier.height(18.dp))
-            ActionRow(game, vm)
-            Spacer(Modifier.height(16.dp))
-            NumberPad(game, vm::input)
-            Spacer(Modifier.weight(1f))
-            Text(
-                "Sudoku limpio, rápido y sin anuncios",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 14.dp)
+        when (tab) {
+            AppTab.PLAY -> PlayScreen(
+                modifier = Modifier.padding(padding),
+                game = game,
+                wins = wins,
+                best = best,
+                vm = vm
+            )
+            AppTab.GAMES -> MyGamesScreen(
+                modifier = Modifier.padding(padding),
+                vm = vm
+            )
+            AppTab.PROFILE -> ProfileScreen(
+                modifier = Modifier.padding(padding),
+                totalGames = vm.history.size
             )
         }
     }
@@ -92,7 +132,11 @@ private fun SudokuApp(vm: GameViewModel = viewModel()) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Difficulty.entries.forEach { difficulty ->
                         OutlinedButton(
-                            onClick = { vm.start(difficulty); showDifficulty = false },
+                            onClick = {
+                                vm.start(difficulty)
+                                showDifficulty = false
+                                tab = AppTab.PLAY
+                            },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text(difficulty.label) }
                     }
@@ -102,7 +146,7 @@ private fun SudokuApp(vm: GameViewModel = viewModel()) {
         )
     }
 
-    if (game.completed) {
+    if (game.completed && tab == AppTab.PLAY) {
         AlertDialog(
             onDismissRequest = {},
             icon = { Icon(Icons.Rounded.EmojiEvents, contentDescription = null) },
@@ -114,12 +158,12 @@ private fun SudokuApp(vm: GameViewModel = viewModel()) {
                 Button(onClick = { vm.start(game.difficulty) }) { Text("Jugar otro") }
             },
             dismissButton = {
-                TextButton(onClick = { showDifficulty = true }) { Text("Cambiar nivel") }
+                TextButton(onClick = { tab = AppTab.GAMES }) { Text("Ver estadísticas") }
             }
         )
     }
 
-    if (game.paused) {
+    if (game.paused && tab == AppTab.PLAY) {
         Box(
             Modifier.fillMaxSize().background(Color(0xE6F9F9FF)),
             contentAlignment = Alignment.Center
@@ -134,6 +178,181 @@ private fun SudokuApp(vm: GameViewModel = viewModel()) {
                     Spacer(Modifier.width(6.dp))
                     Text("Continuar")
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayScreen(
+    modifier: Modifier,
+    game: GameState,
+    wins: Int,
+    best: Long?,
+    vm: GameViewModel
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        GameHeader(game, wins, best)
+        Spacer(Modifier.height(12.dp))
+        SudokuBoard(game, vm::select)
+        Spacer(Modifier.height(18.dp))
+        ActionRow(game, vm)
+        Spacer(Modifier.height(16.dp))
+        NumberPad(game, vm::input)
+        Spacer(Modifier.weight(1f))
+        Text(
+            "Sudoku limpio, rápido y sin anuncios",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 14.dp)
+        )
+    }
+}
+
+@Composable
+private fun MyGamesScreen(modifier: Modifier, vm: GameViewModel) {
+    val stats = vm.playerStats()
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text("Tu progreso", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(
+                "Tus resultados se guardan en este teléfono incluso sin internet.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard("Partidas", stats.totalGames.toString(), Modifier.weight(1f))
+                StatCard("Promedio", stats.averageSeconds?.let(::formatTime) ?: "—", Modifier.weight(1f))
+                StatCard("Perfectas", stats.perfectGames.toString(), Modifier.weight(1f))
+            }
+        }
+
+        item {
+            Text("Récords", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Difficulty.entries.forEach { difficulty ->
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(difficulty.label, fontWeight = FontWeight.SemiBold)
+                                val games = vm.history.count { it.difficulty == difficulty }
+                                Text("$games partidas", style = MaterialTheme.typography.labelMedium)
+                            }
+                            Text(
+                                stats.bestByDifficulty[difficulty]?.let(::formatTime) ?: "Sin récord",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(Modifier.height(4.dp))
+            Text("Historial reciente", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+
+        if (vm.history.isEmpty()) {
+            item {
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(22.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Rounded.SportsEsports, null, modifier = Modifier.size(42.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("Tu primera partida aparecerá aquí", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        } else {
+            items(vm.history, key = { it.id }) { record ->
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(record.difficulty.label, fontWeight = FontWeight.Bold)
+                            Text(
+                                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                    .format(Date(record.completedAtMillis)),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(formatTime(record.elapsedSeconds), fontWeight = FontWeight.Bold)
+                            Text(
+                                "${record.mistakes} errores · ${record.hintsUsed} pistas",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatCard(label: String, value: String, modifier: Modifier = Modifier) {
+    ElevatedCard(modifier) {
+        Column(Modifier.padding(14.dp)) {
+            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ProfileScreen(modifier: Modifier, totalGames: Int) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        ElevatedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(42.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("Perfil local", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("$totalGames partidas guardadas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                HorizontalDivider()
+                Text(
+                    "El juego ya conserva tus estadísticas sin conexión. El siguiente paso habilita Continuar con Google para sincronizarlas entre dispositivos.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text("Google Sync pendiente de configurar") },
+                    leadingIcon = { Icon(Icons.Rounded.CloudSync, null) }
+                )
             }
         }
     }
@@ -178,7 +397,8 @@ private fun SudokuBoard(game: GameState, onSelect: (Int) -> Unit) {
                     val cell = game.cells[index]
                     val selected = game.selected == index
                     val related = game.selected?.let { s ->
-                        val sr = s / 9; val sc = s % 9
+                        val sr = s / 9
+                        val sc = s % 9
                         sr == row || sc == col || (sr / 3 == row / 3 && sc / 3 == col / 3)
                     } ?: false
                     val sameValue = selectedValue != 0 && cell.value == selectedValue
@@ -245,9 +465,21 @@ private fun ActionRow(game: GameState, vm: GameViewModel) {
 }
 
 @Composable
-private fun SmallAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit, active: Boolean = false) {
+private fun SmallAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    active: Boolean = false
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        FilledTonalIconButton(onClick = onClick, colors = if (active) IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer) else IconButtonDefaults.filledTonalIconButtonColors()) {
+        FilledTonalIconButton(
+            onClick = onClick,
+            colors = if (active) {
+                IconButtonDefaults.filledTonalIconButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+            } else {
+                IconButtonDefaults.filledTonalIconButtonColors()
+            }
+        ) {
             Icon(icon, contentDescription = label)
         }
         Text(label, style = MaterialTheme.typography.labelSmall)
