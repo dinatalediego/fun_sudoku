@@ -28,3 +28,36 @@ data class GameState(
     val paused: Boolean = false,
     val completed: Boolean = false
 )
+
+data class GameRecord(
+    val id: String,
+    val difficulty: Difficulty,
+    val elapsedSeconds: Long,
+    val mistakes: Int,
+    val hintsUsed: Int,
+    val completedAtMillis: Long
+)
+
+data class PlayerStats(
+    val totalGames: Int,
+    val averageSeconds: Long?,
+    val perfectGames: Int,
+    val bestByDifficulty: Map<Difficulty, Long>
+) {
+    companion object {
+        fun from(records: List<GameRecord>): PlayerStats {
+            val best = Difficulty.entries.mapNotNull { difficulty ->
+                records.filter { it.difficulty == difficulty }
+                    .minOfOrNull { it.elapsedSeconds }
+                    ?.let { difficulty to it }
+            }.toMap()
+
+            return PlayerStats(
+                totalGames = records.size,
+                averageSeconds = records.map { it.elapsedSeconds }.takeIf { it.isNotEmpty() }?.average()?.toLong(),
+                perfectGames = records.count { it.mistakes == 0 && it.hintsUsed == 0 },
+                bestByDifficulty = best
+            )
+        }
+    }
+}
