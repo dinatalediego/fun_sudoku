@@ -1,8 +1,10 @@
 package com.dinatale.funsudoku
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,14 +25,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.DateFormat
 import java.util.Date
 
 class MainActivity : ComponentActivity() {
+    private val gameViewModel: GameViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { FunSudokuTheme { SudokuApp() } }
+        CloudBackend.handleDeepLink(intent)
+        gameViewModel.refreshCloudAccount()
+        setContent { FunSudokuTheme { SudokuApp(gameViewModel) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        CloudBackend.handleDeepLink(intent)
+        gameViewModel.refreshCloudAccount()
     }
 }
 
@@ -53,7 +65,7 @@ private fun FunSudokuTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SudokuApp(vm: GameViewModel = viewModel()) {
+private fun SudokuApp(vm: GameViewModel) {
     val game = vm.state
     var tab by remember { mutableStateOf(AppTab.PLAY) }
     var showDifficulty by remember { mutableStateOf(false) }
@@ -119,7 +131,7 @@ private fun SudokuApp(vm: GameViewModel = viewModel()) {
             )
             AppTab.PROFILE -> ProfileScreen(
                 modifier = Modifier.padding(padding),
-                totalGames = vm.history.size
+                vm = vm
             )
         }
     }
@@ -225,7 +237,11 @@ private fun MyGamesScreen(modifier: Modifier, vm: GameViewModel) {
         item {
             Text("Tu progreso", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text(
-                "Tus resultados se guardan en este teléfono incluso sin internet.",
+                if (vm.accountEmail != null) {
+                    "Tus resultados se guardan localmente y se sincronizan con ${vm.accountEmail}."
+                } else {
+                    "Tus resultados se guardan en este teléfono incluso sin internet."
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -327,31 +343,81 @@ private fun StatCard(label: String, value: String, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun ProfileScreen(modifier: Modifier, totalGames: Int) {
+private fun ProfileScreen(modifier: Modifier, vm: GameViewModel) {
     Column(
         modifier = modifier.fillMaxSize().padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         ElevatedCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(42.dp))
+                    Icon(Icons.Rounded.AccountCircle, null, modifier = Modifier.size(48.dp))
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text("Perfil local", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("$totalGames partidas guardadas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            vm.accountEmail ?: "Perfil local",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "${vm.history.size} partidas guardadas",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
+
                 HorizontalDivider()
+
+                if (vm.accountEmail != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Rounded.CloudDone, null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text(vm.cloudMessage, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Button(onClick = vm::syncCloud, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Sync, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Sincronizar ahora")
+                    }
+                    TextButton(onClick = vm::signOut, modifier = Modifier.fillMaxWidth()) {
+                        Text("Cerrar sesión")
+                    }
+                } else if (vm.cloudConfigured) {
+                    Text(
+                        "Inicia sesión para conservar tus partidas, estadísticas y récords al cambiar de teléfono.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Button(onClick = vm::signInGoogle, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Rounded.Login, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Continuar con Google")
+                    }
+                    Text(
+                        vm.cloudMessage,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        "El juego ya conserva tus estadísticas sin conexión. La cuenta Google se activará al conectar el proyecto Supabase dedicado de Fun Sudoku.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    AssistChip(
+                        onClick = {},
+                        enabled = false,
+                        label = { Text("Google Sync pendiente de configurar") },
+                        leadingIcon = { Icon(Icons.Rounded.CloudSync, null) }
+                    )
+                }
+            }
+        }
+
+        ElevatedCard(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Offline-first", fontWeight = FontWeight.Bold)
                 Text(
-                    "El juego ya conserva tus estadísticas sin conexión. El siguiente paso habilita Continuar con Google para sincronizarlas entre dispositivos.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                AssistChip(
-                    onClick = {},
-                    enabled = false,
-                    label = { Text("Google Sync pendiente de configurar") },
-                    leadingIcon = { Icon(Icons.Rounded.CloudSync, null) }
+                    "Puedes jugar sin señal. Cuando el login esté activo, la nube sincronizará el historial sin convertir Internet en requisito para jugar.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
