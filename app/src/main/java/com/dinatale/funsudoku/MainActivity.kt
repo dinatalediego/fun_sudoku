@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppTab(val label: String) {
     PLAY("Jugar"),
+    BACKGAMMON("Backgammon"),
     GAMES("Mis juegos"),
     PROFILE("Perfil")
 }
@@ -70,6 +71,7 @@ private fun SudokuApp(vm: GameViewModel) {
     val game = vm.state
     var tab by remember { mutableStateOf(AppTab.PLAY) }
     var showDifficulty by remember { mutableStateOf(false) }
+    var backgammon by remember { mutableStateOf(BackgammonEngine.newGame()) }
     val (wins, best) = vm.stats()
 
     Scaffold(
@@ -79,6 +81,7 @@ private fun SudokuApp(vm: GameViewModel) {
                     Text(
                         when (tab) {
                             AppTab.PLAY -> "FUN SUDOKU"
+                            AppTab.BACKGAMMON -> "BACKGAMMON"
                             AppTab.GAMES -> "MIS JUEGOS"
                             AppTab.PROFILE -> "PERFIL"
                         },
@@ -101,7 +104,13 @@ private fun SudokuApp(vm: GameViewModel) {
                     selected = tab == AppTab.PLAY,
                     onClick = { tab = AppTab.PLAY },
                     icon = { Icon(Icons.Rounded.SportsEsports, null) },
-                    label = { Text(AppTab.PLAY.label) }
+                    label = { Text("Sudoku") }
+                )
+                NavigationBarItem(
+                    selected = tab == AppTab.BACKGAMMON,
+                    onClick = { tab = AppTab.BACKGAMMON },
+                    icon = { Icon(Icons.Rounded.Casino, null) },
+                    label = { Text(AppTab.BACKGAMMON.label) }
                 )
                 NavigationBarItem(
                     selected = tab == AppTab.GAMES,
@@ -125,6 +134,17 @@ private fun SudokuApp(vm: GameViewModel) {
                 wins = wins,
                 best = best,
                 vm = vm
+            )
+            AppTab.BACKGAMMON -> BackgammonScreen(
+                modifier = Modifier.padding(padding),
+                state = backgammon,
+                onRoll = { backgammon = BackgammonEngine.roll(backgammon) },
+                onNewGame = { backgammon = BackgammonEngine.newGame() },
+                onSelectSource = { source ->
+                    backgammon = backgammon.copy(selectedPoint = source.takeUnless { it == -2 })
+                },
+                onMove = { move -> backgammon = BackgammonEngine.play(backgammon, move) },
+                onPass = { backgammon = BackgammonEngine.pass(backgammon) }
             )
             AppTab.GAMES -> MyGamesScreen(
                 modifier = Modifier.padding(padding),

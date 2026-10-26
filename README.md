@@ -1,11 +1,12 @@
 # Fun Sudoku — Android Native
 
-A polished, offline-first Sudoku game for Android, built in **Kotlin + Jetpack Compose**.
+A polished, offline-first collection of board and logic games for Android, built in **Kotlin + Jetpack Compose**.
 
 ## Product principles
 
 - Native Android UX, fast startup and zero web wrapper.
 - Fully playable offline.
+- Multiple games available from the bottom navigation.
 - Procedural Sudoku generation with uniqueness checking.
 - No ads and no account required for the core game.
 - Architecture keeps the Sudoku engine independent from the UI so cloud sync, rankings and learning features can be added later without rewriting the game.
@@ -29,6 +30,13 @@ A polished, offline-first Sudoku game for Android, built in **Kotlin + Jetpack C
 - Unit tests for the Sudoku engine.
 - GitHub Actions build that produces a debug APK artifact.
 
+## Backgammon
+
+- Standard 24-point setup for two players sharing one device.
+- Dice rolls, doubles, legal movement, bar entry, hitting blots and bearing off.
+- Enforces using the maximum number of dice available and the higher die when only one of two different dice can be played.
+- No account or network connection required. A new Backgammon match can be started at any time.
+
 ## Architecture
 
 ```text
@@ -36,7 +44,9 @@ app/src/main/java/com/dinatale/funsudoku/
 ├── MainActivity.kt       # Compose UI and interaction layer
 ├── GameModel.kt          # Immutable game state models
 ├── GameViewModel.kt      # Gameplay orchestration + persistence
-└── SudokuEngine.kt       # Generator, solver and candidates
+├── SudokuEngine.kt       # Generator, solver and candidates
+├── BackgammonEngine.kt   # Backgammon rules and legal move generation
+└── BackgammonScreen.kt   # Touch board and pass-and-play interaction
 ```
 
 The core loop is intentionally local:
